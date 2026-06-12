@@ -1128,3 +1128,35 @@ python check_production_ready.py
 ```
 
 Kết quả hiện tại: `20/20 checks passed (100%)`.
+
+### Step 10: Kết quả deploy Render
+
+- Public URL: <https://twoa202600645-nguyenthiyen-day12.onrender.com>
+- API documentation: <https://twoa202600645-nguyenthiyen-day12.onrender.com/docs>
+- Thời điểm kiểm tra: `2026-06-12`
+
+Kết quả kiểm tra public deployment:
+
+| Kiểm tra | Kết quả |
+|----------|---------|
+| `GET /health` | HTTP `200`, trả `{"status":"ok"}` |
+| `GET /ready` | HTTP `200`, trả `{"status":"ready"}` |
+| `POST /ask` không có API key | HTTP `401 Unauthorized` |
+| Public URL hoạt động | Đạt |
+| API key authentication | Đạt |
+| Render deployment | Đạt |
+
+Lệnh kiểm tra deployment:
+
+```powershell
+$URL = "https://twoa202600645-nguyenthiyen-day12.onrender.com"
+$API_KEY = "<AGENT_API_KEY được cấu hình trên Render>"
+
+curl.exe "$URL/health"
+curl.exe "$URL/ready"
+
+curl.exe -X POST "$URL/ask" `
+  -H "X-API-Key: $API_KEY" `
+  -H "Content-Type: application/json" `
+  -d '{\"question\":\"What is production deployment?\",\"user_id\":\"user1\"}'
+```
