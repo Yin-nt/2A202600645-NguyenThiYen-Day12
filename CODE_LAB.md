@@ -930,3 +930,201 @@ A: Railway: `railway scale <replicas>`. Render: Dashboard → Settings → Insta
 ---
 
 **Happy Deploying! **
+
+---
+
+# Đáp Án Bài Tập
+
+## Part 1: Localhost vs Production
+
+### Exercise 1.1: Các anti-pattern trong bản develop
+
+1. API key được hardcode trong source code, dễ bị lộ khi commit hoặc chia sẻ.
+2. Port `8000` được hardcode, không tương thích với port do cloud platform cấp.
+3. Chạy với debug/reload mode, vừa tốn tài nguyên vừa có thể làm lộ thông tin lỗi.
+4. Không có endpoint health check để platform phát hiện tiến trình bị lỗi.
+5. Không xử lý graceful shutdown khi nhận `SIGTERM`.
+6. Dùng `print()` thay vì structured logging nên khó tìm kiếm và giám sát log.
+7. Cấu hình không lấy từ environment variables.
+8. Thiếu validation và error handling phù hợp cho production.
+
+### Exercise 1.3: So sánh basic và advanced
+
+| Feature | Basic | Advanced | Tại sao quan trọng? |
+|---------|-------|----------|---------------------|
+| Config | Hardcode | Environment variables | Cho phép đổi cấu hình theo môi trường mà không sửa code hoặc rebuild |
+| Health check | Không có | Có `/health` | Cloud platform biết ứng dụng còn hoạt động để restart khi cần |
+| Logging | `print()` | Structured JSON logging | Dễ tìm kiếm, tổng hợp và phân tích bằng hệ thống logging |
+| Shutdown | Đột ngột | Graceful shutdown | Cho request đang xử lý hoàn thành trước khi tiến trình dừng |
+| Validation | Hạn chế | Pydantic models | Chặn dữ liệu không hợp lệ trước khi vào business logic |
+| Security | Secret hardcode | Secret từ environment | Tránh đưa thông tin bí mật vào source control |
+
+Health check là endpoint nhẹ dùng để báo trạng thái của ứng dụng. Graceful
+shutdown là quá trình ngừng nhận request mới, hoàn thành request đang chạy,
+đóng connection rồi mới thoát.
+
+## Part 2: Docker Containerization
+
+### Exercise 2.1: Dockerfile cơ bản
+
+1. Base image là `python:3.11-slim`.
+2. Working directory là `/app`.
+3. `requirements.txt` được copy trước source code để tận dụng Docker layer cache.
+   Khi code thay đổi nhưng dependencies không đổi, Docker không phải cài lại thư viện.
+4. `CMD` cung cấp lệnh mặc định và dễ bị ghi đè khi chạy container.
+   `ENTRYPOINT` xác định executable chính; arguments truyền khi `docker run`
+   thường được nối vào sau entrypoint.
+
+Kích thước image thực tế phụ thuộc Docker version, base-image version và cache
+tại thời điểm build; kiểm tra bằng `docker images my-agent:develop`.
+
+### Exercise 2.3: Multi-stage build
+
+- Stage 1 (`builder`) cài compiler và dependencies, sau đó tạo các package cần thiết.
+- Stage 2 (`runtime`) chỉ copy package đã cài và source code cần để chạy ứng dụng.
+- Image nhỏ hơn vì compiler, header, cache và các công cụ build không xuất hiện
+  trong runtime image.
+
+### Exercise 2.4: Docker Compose stack
+
+Các service được start:
+
+- `nginx`: nhận request từ client và làm reverse proxy/load balancer.
+- `agent`: chạy FastAPI AI agent.
+- `redis`: lưu state dùng chung giữa các agent instance.
+
+Luồng giao tiếp:
+
+```text
+Client -> Nginx -> Agent instance(s) -> Redis
+```
+
+Các container giao tiếp qua Docker network bằng service name như `agent` và
+`redis`; chỉ Nginx cần publish port ra máy host.
+
+## Part 3: Cloud Deployment
+
+### Exercise 3.1: Railway
+
+Railway build ứng dụng theo cấu hình trong `railway.toml`, inject environment
+variables và cung cấp public domain. Sau deploy cần kiểm tra `/health`, `/ready`
+và `/ask`; endpoint `/ask` phải gửi API key hợp lệ.
+
+### Exercise 3.2: Railway và Render
+
+| Nội dung | `railway.toml` | `render.yaml` |
+|----------|----------------|---------------|
+| Platform | Railway | Render |
+| Mục đích | Cấu hình build/deploy của một Railway service | Blueprint mô tả một hoặc nhiều Render services |
+| Environment variables | Thường đặt bằng CLI/dashboard | Có thể khai báo trong `envVars` |
+| Health check | `healthcheckPath` | `healthCheckPath` |
+| Secret | Đặt bằng Railway variables | `sync: false` hoặc `generateValue: true` |
+
+### Exercise 3.3: Cloud Run CI/CD
+
+`cloudbuild.yaml` mô tả pipeline build image, push image lên registry và deploy.
+`service.yaml` mô tả Cloud Run service như container image, port, environment,
+resource limits và scaling. Khi source thay đổi, pipeline tạo image mới rồi cập
+nhật revision của Cloud Run.
+
+## Part 4: API Security
+
+### Exercise 4.1: API key authentication
+
+- API key được đọc từ header `X-API-Key` và so sánh với key cấu hình.
+- Nếu thiếu hoặc sai key, API trả về HTTP `401 Unauthorized`.
+- Để rotate key: tạo key mới, cập nhật secret/environment variable trên platform,
+  restart hoặc redeploy service, cập nhật client rồi vô hiệu hóa key cũ.
+
+Không nên ghi API key vào source code hoặc log.
+
+### Exercise 4.2: JWT flow
+
+1. Client gửi username/password đến endpoint cấp token.
+2. Server xác thực và ký JWT chứa user ID, role và thời gian hết hạn.
+3. Client gửi `Authorization: Bearer <token>` trong các request tiếp theo.
+4. Server kiểm tra chữ ký và expiry rồi lấy user/role từ payload.
+
+JWT authentication là stateless vì server không cần lưu từng token session.
+
+### Exercise 4.3: Rate limiting
+
+- Bản production trong `04-api-gateway` dùng sliding-window dựa trên timestamps.
+- User thường được giới hạn `10 requests/minute`; admin là `100 requests/minute`.
+- Admin không hoàn toàn bypass, nhưng dùng limiter có ngưỡng cao hơn.
+- Khi vượt limit, API trả HTTP `429 Too Many Requests` cùng `Retry-After`.
+
+### Exercise 4.4: Cost guard
+
+Cost guard kiểm tra chi phí hiện tại trước khi gọi LLM, ghi nhận chi phí sau khi
+gọi và trả HTTP `402` khi user vượt budget. Trong final project, spending được
+lưu trong Redis theo key dạng `budget:<user_id>:<YYYY-MM>` và có TTL để tự hết hạn.
+
+## Part 5: Scaling & Reliability
+
+### Exercise 5.1: Health checks
+
+- `/health` là liveness probe: trả `200` nếu process vẫn sống.
+- `/ready` là readiness probe: kiểm tra dependency như Redis; trả `503` nếu
+  instance chưa thể nhận traffic.
+
+Không nên thực hiện kiểm tra chậm hoặc quá nặng trong liveness probe.
+
+### Exercise 5.2: Graceful shutdown
+
+Khi nhận `SIGTERM`, ứng dụng đánh dấu không ready để load balancer ngừng gửi
+request mới. Uvicorn chờ request đang chạy hoàn thành trong thời gian timeout,
+lifespan shutdown đóng các connection rồi tiến trình mới thoát.
+
+### Exercise 5.3: Stateless design
+
+State trong memory chỉ tồn tại trên một instance. Khi load balancer chuyển request
+sang instance khác hoặc instance bị restart, state đó sẽ mất. Lưu conversation
+history trong Redis giúp mọi instance đọc cùng dữ liệu và có thể scale ngang.
+
+### Exercise 5.4: Load balancing
+
+Khi chạy `docker compose up --scale agent=3`, Docker tạo ba agent container.
+Nginx gửi request theo cơ chế round-robin đến service `agent`. Nếu một instance
+không phản hồi, `proxy_next_upstream` cho phép thử instance khác.
+
+### Exercise 5.5: Stateless test
+
+Test đạt yêu cầu khi conversation vẫn tồn tại sau khi một agent instance bị dừng
+và request tiếp theo được xử lý bởi instance khác. Điều này chứng minh state nằm
+trong Redis thay vì memory của agent.
+
+## Part 6: Final Project
+
+Final project trong thư mục `06-lab-complete` đã triển khai:
+
+- REST API và conversation history lưu trong Redis.
+- API key authentication.
+- Redis sliding-window rate limit `10 requests/minute/user`.
+- Redis monthly cost guard `$10/user`.
+- `/health`, `/ready` và graceful shutdown.
+- Structured JSON logging.
+- Multi-stage Dockerfile chạy bằng non-root user.
+- Docker Compose gồm Nginx, các agent instance và Redis có persistent volume.
+- Railway và Render deployment configuration.
+
+Chạy local:
+
+```bash
+cd 06-lab-complete
+docker compose up --build --scale agent=3
+curl http://localhost:8000/health
+curl http://localhost:8000/ready
+curl -X POST http://localhost:8000/ask \
+  -H "X-API-Key: dev-key-change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"question":"Hello","user_id":"user1"}'
+```
+
+Kiểm tra production readiness:
+
+```bash
+python check_production_ready.py
+```
+
+Kết quả hiện tại: `20/20 checks passed (100%)`.
